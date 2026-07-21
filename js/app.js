@@ -9,6 +9,7 @@ const DEFAULT_DATA = {
       email: "",
       notes: "",
       items: [],
+      documents: [],
     },
     {
       id: uid(),
@@ -17,6 +18,7 @@ const DEFAULT_DATA = {
       email: "",
       notes: "",
       items: [],
+      documents: [],
     },
     {
       id: uid(),
@@ -25,6 +27,7 @@ const DEFAULT_DATA = {
       email: "",
       notes: "",
       items: [],
+      documents: [],
     },
   ],
 };
@@ -187,6 +190,11 @@ function renderOffices() {
           }
         </div>
         <button class="add-item-btn" data-action="add-item" data-office-id="${office.id}">+ Add item</button>
+        <div class="doc-list">
+          <div class="doc-list-label">Documents</div>
+          ${(office.documents || []).map((doc) => docRowHtml(office.id, doc)).join("")}
+          <button class="add-item-btn" data-action="add-document" data-office-id="${office.id}">+ Add document</button>
+        </div>
       </div>`;
     })
     .join("");
@@ -209,6 +217,18 @@ function itemRowHtml(officeId, item) {
       </div>
       <span class="badge ${item.status}">${STATUS_LABELS[item.status]}</span>
       <button class="icon-btn" data-action="edit-item" data-office-id="${officeId}" data-item-id="${item.id}">Edit</button>
+    </div>`;
+}
+
+function safeUrl(url) {
+  return /^https?:\/\//i.test(url) ? url : "#";
+}
+
+function docRowHtml(officeId, doc) {
+  return `
+    <div class="doc-row" data-doc-id="${doc.id}">
+      <a class="doc-link" href="${escapeHtml(safeUrl(doc.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(doc.label)}</a>
+      <button class="icon-btn" data-action="edit-document" data-office-id="${officeId}" data-doc-id="${doc.id}">Edit</button>
     </div>`;
 }
 
@@ -259,7 +279,7 @@ officeForm.addEventListener("submit", (e) => {
     const office = state.offices.find((o) => o.id === id);
     Object.assign(office, payload);
   } else {
-    state.offices.push({ id: uid(), items: [], ...payload });
+    state.offices.push({ id: uid(), items: [], documents: [], ...payload });
   }
   closeOfficeModal();
   render();
@@ -330,6 +350,59 @@ document.getElementById("deleteItemBtn").addEventListener("click", () => {
   render();
 });
 
+// ---- Document modal ----
+const documentModalBackdrop = document.getElementById("documentModalBackdrop");
+const documentForm = document.getElementById("documentForm");
+
+function openDocumentModal(officeId, docId) {
+  const office = state.offices.find((o) => o.id === officeId);
+  const doc = docId ? (office.documents || []).find((d) => d.id === docId) : null;
+  document.getElementById("documentModalTitle").textContent = doc ? "Edit Document" : "Add Document";
+  document.getElementById("documentId").value = doc ? doc.id : "";
+  document.getElementById("documentOfficeId").value = officeId;
+  document.getElementById("documentLabel").value = doc ? doc.label : "";
+  document.getElementById("documentUrl").value = doc ? doc.url : "";
+  document.getElementById("deleteDocumentBtn").hidden = !doc;
+  documentModalBackdrop.hidden = false;
+}
+
+function closeDocumentModal() {
+  documentModalBackdrop.hidden = true;
+}
+
+document.getElementById("cancelDocumentBtn").addEventListener("click", closeDocumentModal);
+
+documentForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const id = document.getElementById("documentId").value;
+  const officeId = document.getElementById("documentOfficeId").value;
+  const office = state.offices.find((o) => o.id === officeId);
+  office.documents = office.documents || [];
+  const payload = {
+    label: document.getElementById("documentLabel").value.trim(),
+    url: document.getElementById("documentUrl").value.trim(),
+  };
+  if (!payload.label || !payload.url) return;
+
+  if (id) {
+    const doc = office.documents.find((d) => d.id === id);
+    Object.assign(doc, payload);
+  } else {
+    office.documents.push({ id: uid(), ...payload });
+  }
+  closeDocumentModal();
+  render();
+});
+
+document.getElementById("deleteDocumentBtn").addEventListener("click", () => {
+  const id = document.getElementById("documentId").value;
+  const officeId = document.getElementById("documentOfficeId").value;
+  const office = state.offices.find((o) => o.id === officeId);
+  office.documents = (office.documents || []).filter((d) => d.id !== id);
+  closeDocumentModal();
+  render();
+});
+
 // ---- Delegated clicks on office cards ----
 document.getElementById("officesContainer").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
@@ -338,6 +411,8 @@ document.getElementById("officesContainer").addEventListener("click", (e) => {
   if (action === "edit-office") openOfficeModal(officeId);
   if (action === "add-item") openItemModal(officeId, null);
   if (action === "edit-item") openItemModal(officeId, itemId);
+  if (action === "add-document") openDocumentModal(officeId, null);
+  if (action === "edit-document") openDocumentModal(officeId, btn.dataset.docId);
 });
 
 document.getElementById("officesContainer").addEventListener("change", (e) => {
