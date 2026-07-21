@@ -275,6 +275,38 @@ body {
   padding: 0.2rem 0;
 }
 
+.doc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
+.doc-list-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.doc-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.doc-link {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.doc-link:hover { text-decoration: underline; }
+
 .empty-state {
   max-width: 1200px;
   margin: 3rem auto;
