@@ -42,6 +42,10 @@ body {
   padding: 1rem;
 }
 
+.login-screen[hidden] {
+  display: none;
+}
+
 .login-card {
   background: var(--card-bg);
   border: 1px solid var(--border);
