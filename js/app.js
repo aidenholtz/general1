@@ -1,59 +1,7 @@
-const STORAGE_KEY = "chapterOpsDashboard.v1";
+const SUPABASE_URL = "https://vbzbgtrhlgcrvjiaxoqy.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_zL1pMaSWOonZBjyqgQDetA_VFPX8gtJ";
 
-const DEFAULT_DATA = {
-  offices: [
-    {
-      id: uid(),
-      name: "Office of Sorority & Fraternity Life",
-      contact: "",
-      email: "",
-      notes: "",
-      items: [],
-      documents: [],
-    },
-    {
-      id: uid(),
-      name: "Housing & Residence Life",
-      contact: "",
-      email: "",
-      notes: "",
-      items: [],
-      documents: [],
-    },
-    {
-      id: uid(),
-      name: "Parking & Transportation",
-      contact: "",
-      email: "",
-      notes: "",
-      items: [],
-      documents: [],
-    },
-  ],
-};
-
-function uid() {
-  return (crypto.randomUUID && crypto.randomUUID()) ||
-    `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function loadData() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return structuredClone(DEFAULT_DATA);
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed.offices) throw new Error("malformed");
-    return parsed;
-  } catch {
-    return structuredClone(DEFAULT_DATA);
-  }
-}
-
-function saveData() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
-let state = loadData();
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const STATUS_LABELS = {
   not_started: "Not started",
@@ -61,6 +9,8 @@ const STATUS_LABELS = {
   waiting: "Waiting on them",
   done: "Done",
 };
+
+let state = { offices: [] };
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -95,7 +45,6 @@ function officeStatus(office) {
 function render() {
   renderSummary();
   renderOffices();
-  saveData();
 }
 
 function renderSummary() {
@@ -241,6 +190,39 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+// ---- Loading data from Supabase ----
+async function refresh() {
+  const { data: offices, error } = await supabase
+    .from("offices")
+    .select("*, items(*), documents(*)")
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    alert("Could not load dashboard data: " + error.message);
+    return;
+  }
+
+  state = {
+    offices: (offices || []).map((o) => ({
+      id: o.id,
+      name: o.name,
+      contact: o.contact,
+      email: o.email,
+      notes: o.notes,
+      items: (o.items || []).map((i) => ({
+        id: i.id,
+        title: i.title,
+        details: i.details,
+        dueDate: i.due_date,
+        status: i.status,
+      })),
+      documents: (o.documents || []).map((d) => ({ id: d.id, label: d.label, url: d.url })),
+    })),
+  };
+
+  render();
+}
+
 // ---- Office modal ----
 const officeModalBackdrop = document.getElementById("officeModalBackdrop");
 const officeForm = document.getElementById("officeForm");
@@ -264,7 +246,7 @@ function closeOfficeModal() {
 document.getElementById("addOfficeBtn").addEventListener("click", () => openOfficeModal(null));
 document.getElementById("cancelOfficeBtn").addEventListener("click", closeOfficeModal);
 
-officeForm.addEventListener("submit", (e) => {
+officeForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const id = document.getElementById("officeId").value;
   const payload = {
@@ -275,23 +257,29 @@ officeForm.addEventListener("submit", (e) => {
   };
   if (!payload.name) return;
 
-  if (id) {
-    const office = state.offices.find((o) => o.id === id);
-    Object.assign(office, payload);
-  } else {
-    state.offices.push({ id: uid(), items: [], documents: [], ...payload });
+  const { error } = id
+    ? await supabase.from("offices").update(payload).eq("id", id)
+    : await supabase.from("offices").insert(payload);
+
+  if (error) {
+    alert("Could not save office: " + error.message);
+    return;
   }
   closeOfficeModal();
-  render();
+  await refresh();
 });
 
-document.getElementById("deleteOfficeBtn").addEventListener("click", () => {
+document.getElementById("deleteOfficeBtn").addEventListener("click", async () => {
   const id = document.getElementById("officeId").value;
   if (!id) return;
   if (!confirm("Delete this office and all its items?")) return;
-  state.offices = state.offices.filter((o) => o.id !== id);
+  const { error } = await supabase.from("offices").delete().eq("id", id);
+  if (error) {
+    alert("Could not delete office: " + error.message);
+    return;
+  }
   closeOfficeModal();
-  render();
+  await refresh();
 });
 
 // ---- Item modal ----
@@ -318,36 +306,40 @@ function closeItemModal() {
 
 document.getElementById("cancelItemBtn").addEventListener("click", closeItemModal);
 
-itemForm.addEventListener("submit", (e) => {
+itemForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const id = document.getElementById("itemId").value;
   const officeId = document.getElementById("itemOfficeId").value;
-  const office = state.offices.find((o) => o.id === officeId);
   const payload = {
     title: document.getElementById("itemTitle").value.trim(),
     details: document.getElementById("itemDetails").value.trim(),
-    dueDate: document.getElementById("itemDueDate").value,
+    due_date: document.getElementById("itemDueDate").value || null,
     status: document.getElementById("itemStatus").value,
   };
   if (!payload.title) return;
 
-  if (id) {
-    const item = office.items.find((i) => i.id === id);
-    Object.assign(item, payload);
-  } else {
-    office.items.push({ id: uid(), ...payload });
+  const { error } = id
+    ? await supabase.from("items").update(payload).eq("id", id)
+    : await supabase.from("items").insert({ ...payload, office_id: officeId });
+
+  if (error) {
+    alert("Could not save item: " + error.message);
+    return;
   }
   closeItemModal();
-  render();
+  await refresh();
 });
 
-document.getElementById("deleteItemBtn").addEventListener("click", () => {
+document.getElementById("deleteItemBtn").addEventListener("click", async () => {
   const id = document.getElementById("itemId").value;
-  const officeId = document.getElementById("itemOfficeId").value;
-  const office = state.offices.find((o) => o.id === officeId);
-  office.items = office.items.filter((i) => i.id !== id);
+  if (!id) return;
+  const { error } = await supabase.from("items").delete().eq("id", id);
+  if (error) {
+    alert("Could not delete item: " + error.message);
+    return;
+  }
   closeItemModal();
-  render();
+  await refresh();
 });
 
 // ---- Document modal ----
@@ -372,35 +364,38 @@ function closeDocumentModal() {
 
 document.getElementById("cancelDocumentBtn").addEventListener("click", closeDocumentModal);
 
-documentForm.addEventListener("submit", (e) => {
+documentForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const id = document.getElementById("documentId").value;
   const officeId = document.getElementById("documentOfficeId").value;
-  const office = state.offices.find((o) => o.id === officeId);
-  office.documents = office.documents || [];
   const payload = {
     label: document.getElementById("documentLabel").value.trim(),
     url: document.getElementById("documentUrl").value.trim(),
   };
   if (!payload.label || !payload.url) return;
 
-  if (id) {
-    const doc = office.documents.find((d) => d.id === id);
-    Object.assign(doc, payload);
-  } else {
-    office.documents.push({ id: uid(), ...payload });
+  const { error } = id
+    ? await supabase.from("documents").update(payload).eq("id", id)
+    : await supabase.from("documents").insert({ ...payload, office_id: officeId });
+
+  if (error) {
+    alert("Could not save document: " + error.message);
+    return;
   }
   closeDocumentModal();
-  render();
+  await refresh();
 });
 
-document.getElementById("deleteDocumentBtn").addEventListener("click", () => {
+document.getElementById("deleteDocumentBtn").addEventListener("click", async () => {
   const id = document.getElementById("documentId").value;
-  const officeId = document.getElementById("documentOfficeId").value;
-  const office = state.offices.find((o) => o.id === officeId);
-  office.documents = (office.documents || []).filter((d) => d.id !== id);
+  if (!id) return;
+  const { error } = await supabase.from("documents").delete().eq("id", id);
+  if (error) {
+    alert("Could not delete document: " + error.message);
+    return;
+  }
   closeDocumentModal();
-  render();
+  await refresh();
 });
 
 // ---- Delegated clicks on office cards ----
@@ -415,14 +410,16 @@ document.getElementById("officesContainer").addEventListener("click", (e) => {
   if (action === "edit-document") openDocumentModal(officeId, btn.dataset.docId);
 });
 
-document.getElementById("officesContainer").addEventListener("change", (e) => {
+document.getElementById("officesContainer").addEventListener("change", async (e) => {
   const el = e.target.closest("[data-action='toggle-done']");
   if (!el) return;
-  const { officeId, itemId } = el.dataset;
-  const office = state.offices.find((o) => o.id === officeId);
-  const item = office.items.find((i) => i.id === itemId);
-  item.status = el.checked ? "done" : "not_started";
-  render();
+  const newStatus = el.checked ? "done" : "not_started";
+  const { error } = await supabase.from("items").update({ status: newStatus }).eq("id", el.dataset.itemId);
+  if (error) {
+    alert("Could not update item: " + error.message);
+    return;
+  }
+  await refresh();
 });
 
 document.getElementById("filterSelect").addEventListener("change", render);
@@ -442,18 +439,103 @@ document.getElementById("importInput").addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
+    let parsed;
     try {
-      const parsed = JSON.parse(reader.result);
+      parsed = JSON.parse(reader.result);
       if (!parsed.offices) throw new Error("Invalid file: missing 'offices'");
-      state = parsed;
-      render();
     } catch (err) {
       alert("Could not import file: " + err.message);
+      return;
     }
+
+    for (const office of parsed.offices) {
+      const { data: newOffice, error: officeError } = await supabase
+        .from("offices")
+        .insert({
+          name: office.name,
+          contact: office.contact || "",
+          email: office.email || "",
+          notes: office.notes || "",
+        })
+        .select()
+        .single();
+
+      if (officeError) {
+        alert(`Could not import office "${office.name}": ` + officeError.message);
+        continue;
+      }
+
+      for (const item of office.items || []) {
+        await supabase.from("items").insert({
+          office_id: newOffice.id,
+          title: item.title,
+          details: item.details || "",
+          due_date: item.dueDate || null,
+          status: item.status || "not_started",
+        });
+      }
+
+      for (const doc of office.documents || []) {
+        await supabase.from("documents").insert({
+          office_id: newOffice.id,
+          label: doc.label,
+          url: doc.url,
+        });
+      }
+    }
+
+    e.target.value = "";
+    await refresh();
+    alert("Import complete.");
   };
   reader.readAsText(file);
-  e.target.value = "";
 });
 
-render();
+// ---- Auth ----
+const loginScreen = document.getElementById("loginScreen");
+const appScreen = document.getElementById("appScreen");
+const loginForm = document.getElementById("loginForm");
+const loginError = document.getElementById("loginError");
+
+function showApp() {
+  loginScreen.hidden = true;
+  appScreen.hidden = false;
+}
+
+function showLogin() {
+  appScreen.hidden = true;
+  loginScreen.hidden = false;
+}
+
+loginForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  loginError.hidden = true;
+  const email = document.getElementById("loginEmail").value.trim();
+  const password = document.getElementById("loginPassword").value;
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    loginError.textContent = error.message;
+    loginError.hidden = false;
+    return;
+  }
+  showApp();
+  await refresh();
+});
+
+document.getElementById("logoutBtn").addEventListener("click", async () => {
+  await supabase.auth.signOut();
+  showLogin();
+});
+
+(async function init() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (session) {
+    showApp();
+    await refresh();
+  } else {
+    showLogin();
+  }
+})();
